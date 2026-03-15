@@ -14,6 +14,16 @@ interface RedditApiResponse {
     children: RedditApiChild[];
   };
 }
+function buildRequestHeaders(): HeadersInit {
+  return {
+    'User-Agent': process.env.REDDIT_USER_AGENT ?? 'XboxGamePassMonitor/1.0 by u/unknown',
+    Accept: 'application/json',
+  };
+}
+
+function buildSubredditUrl(subreddit: string, limit: number) {
+  return `https://www.reddit.com/r/${subreddit}/new.json?limit=${limit}&raw_json=1`;
+}
 
 export async function fetchSubreddit(subreddit: string, limit = 25): Promise<RedditPostRaw[]> {
   const now = Date.now();
@@ -22,16 +32,10 @@ export async function fetchSubreddit(subreddit: string, limit = 25): Promise<Red
     return [];
   }
 
-  const res = await fetch(
-    `https://www.reddit.com/r/${subreddit}/new.json?limit=${limit}&raw_json=1`,
-    {
-      headers: {
-        'User-Agent': 'XboxGamePassMonitor/1.0 (reddit-code-scanner)',
-        Accept: 'application/json',
-      },
-      cache: 'no-store',
-    },
-  );
+  const res = await fetch(buildSubredditUrl(subreddit, limit), {
+    headers: buildRequestHeaders(),
+    cache: 'no-store',
+  });
 
   if (res.status === 429) {
     const retryAfter = res.headers.get('retry-after');
@@ -48,7 +52,10 @@ export async function fetchSubreddit(subreddit: string, limit = 25): Promise<Red
   }
 
   if (!res.ok) {
-    throw new Error(`Reddit API error for r/${subreddit}: ${res.status} ${res.statusText}`);
+    const details = await res.text();
+    throw new Error(
+      `Reddit API error for r/${subreddit}: ${res.status} ${res.statusText} ${details.slice(0, 180)}`,
+    );
   }
 
   const json = (await res.json()) as RedditApiResponse;

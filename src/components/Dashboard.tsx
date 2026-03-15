@@ -5,6 +5,7 @@ import type { ScannedPost } from '@/lib/types';
 import PostCard from './PostCard';
 
 const ALL_SUBREDDITS = ['XboxGamePass', 'xbox', 'giveaways', 'GameDeals'] as const;
+const POLL_INTERVAL_MS = 30_000;
 type Subreddit = (typeof ALL_SUBREDDITS)[number];
 type ConnectionStatus = 'connecting' | 'connected' | 'error';
 type FilterStatus = 'all' | 'code_detected' | 'possible_code';
@@ -135,10 +136,26 @@ export default function Dashboard() {
     setLastUpdated(new Date());
   }, []);
 
+  const fetchSnapshot = useCallback(async () => {
+    try {
+      const res = await fetch('/api/reddit-monitor', { cache: 'no-store' });
+      if (!res.ok) return;
+
+      const data = (await res.json()) as { posts?: ScannedPost[] };
+      const isInitial = !hasLoadedInitialRef.current;
+      hasLoadedInitialRef.current = true;
+      handleNewPosts(data.posts ?? [], isInitial);
+      setConnectionStatus('connected');
+    } catch {
+      // keep existing connection state when fallback request fails
+    }
+  }, [handleNewPosts]);
+
   // ── SSE connection ──────────────────────────────────────────────────────────
   useEffect(() => {
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackPollTimer: ReturnType<typeof setInterval> | null = null;
     let mounted = true;
 
     const connect = () => {
@@ -173,16 +190,22 @@ export default function Dashboard() {
         es?.close();
         retryTimer = setTimeout(connect, 5000);
       };
+
+      fallbackPollTimer = setInterval(() => {
+        void fetchSnapshot();
+      }, POLL_INTERVAL_MS);
     };
 
     connect();
+    void fetchSnapshot();
 
     return () => {
       mounted = false;
       es?.close();
       if (retryTimer) clearTimeout(retryTimer);
+      if (fallbackPollTimer) clearInterval(fallbackPollTimer);
     };
-  }, [handleNewPosts]);
+  }, [fetchSnapshot, handleNewPosts]);
 
   // ── Subreddit visibility toggle ─────────────────────────────────────────────
   const toggleSubreddit = (sub: Subreddit) => {
